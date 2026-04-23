@@ -1,1 +1,27 @@
-
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>최종본 생성 사이트 안내</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif; margin: 0; background: #f6f7fb; color: #1f2430; }
+    main { width: min(840px, calc(100% - 24px)); margin: 32px auto; background: #fff; border: 1px solid #e6e8ef; border-radius: 18px; padding: 24px; }
+    a { color: #4338ca; }
+    code { background: #f2f4f7; padding: 2px 6px; border-radius: 6px; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>최종본 생성 사이트</h1>
+    <p>이 저장소는 GitHub Pages만으로 실행되지 않습니다. 실제 생성 기능은 Python과 LibreOffice가 필요한 서버형 배포 환경에서 동작합니다.</p>
+    <p>권장 배포: <strong>Render</strong></p>
+    <ol>
+      <li>이 저장소를 GitHub에 업로드</li>
+      <li>Render에서 새 Web Service 생성</li>
+      <li>이 저장소를 연결</li>
+      <li>배포 후 <code>/healthz</code> 확인</li>
+    </ol>
+  </main>
+</body>
+</html>
