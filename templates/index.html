@@ -1,1 +1,64 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ title }}</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <main class="wrap">
+    <section class="card hero">
+      <h1>{{ title }}</h1>
+      <p class="sub">줄 PDF + 야붙 PDF + 전사문 텍스트를 넣으면 최종본을 생성합니다.</p>
+      <ul class="tips">
+        <li>전사문은 파일 업로드가 아니라 아래 큰 입력칸에 붙여넣기</li>
+        <li>생성 후에는 직접 PDF보다 <strong>권장 다운로드 ZIP</strong>을 먼저 받는 것을 추천</li>
+        <li>무료 서버에서는 생성 직후 바로 다운로드하는 것이 안전</li>
+      </ul>
+    </section>
 
+    <section class="card">
+      <form action="/generate" method="post" enctype="multipart/form-data" class="form-grid">
+        <label>
+          <span>줄 PDF</span>
+          <input type="file" name="jul_pdf" accept="application/pdf" required>
+        </label>
+        <label>
+          <span>야붙 PDF</span>
+          <input type="file" name="yabout_pdf" accept="application/pdf" required>
+        </label>
+        <label class="full">
+          <span>전사문 텍스트</span>
+          <textarea name="transcript_text" rows="18" placeholder="여기에 전사문 전체를 붙여넣으세요." required></textarea>
+        </label>
+        <button type="submit">최종본 생성하기</button>
+      </form>
+    </section>
+
+    {% if error %}
+    <section class="card error">{{ error }}</section>
+    {% endif %}
+
+    {% if message %}
+    <section class="card success">{{ message }}</section>
+    {% endif %}
+
+    {% if result %}
+    <section class="card">
+      <h2>생성 결과</h2>
+      <p class="sub">run_id: {{ result.run_id }} · 전사문 글자 수: {{ result.char_count }}</p>
+      <div class="links">
+        {% for item in result.links %}
+        <a class="download{% if item.preferred %} preferred{% endif %}" href="{{ item.href }}">
+          <strong>{{ item.label }}</strong>
+          <small>{{ item.filename }}</small>
+          {% if item.preferred %}<em>추천</em>{% endif %}
+        </a>
+        {% endfor %}
+      </div>
+    </section>
+    {% endif %}
+  </main>
+</body>
+</html>
