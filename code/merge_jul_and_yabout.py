@@ -56,6 +56,7 @@ def similarity(a: str, b: str) -> float:
         return 0.0
     if a == b:
         return 1.0
+
     ratio = SequenceMatcher(None, a[:5000], b[:5000]).ratio()
     ta = set(a.split())
     tb = set(b.split())
@@ -68,9 +69,16 @@ def align_pages(
     yabout_pages_excluding_first: List[PageInfo],
     lookahead: int = 30,
     threshold: float = 0.55,
-    fallback_threshold: float = 0.20,
+    fallback_threshold: float = 0.10,
 ) -> Tuple[List[Tuple[int, int, float]], List[int]]:
-    """Return matches between jul[1:] and yabout[1:], and unmatched yabout pages."""
+    """
+    Return matches between jul[1:] and yabout[1:], and unmatched yabout pages.
+
+    변경점:
+    - 예전처럼 매칭 실패 시 RuntimeError로 중단하지 않음
+    - 확신도가 너무 낮으면 그 지점에서 매칭을 종료하고
+      남은 야붙 페이지는 tail 삽입 대상으로 넘김
+    """
     matches: List[Tuple[int, int, float]] = []
     extras: List[int] = []
 
@@ -80,6 +88,8 @@ def align_pages(
     for i, jul in enumerate(jul_pages):
         best_idx = None
         best_score = -1.0
+
+        # 우선 현재 포인터 근처 lookahead 범위에서 탐색
         for k in range(j, min(total_y, j + lookahead)):
             score = similarity(jul.norm_text, yabout_pages_excluding_first[k].norm_text)
             if score > best_score:
@@ -88,6 +98,8 @@ def align_pages(
             if score == 1.0:
                 break
 
+        # lookahead 안에서 충분히 높지 않으면 남은 페이지도 훑어보되,
+        # 너무 멀리 있는 페이지는 약간 불리하게 조정
         if best_score < threshold:
             for k in range(min(total_y, j + lookahead), total_y):
                 raw_score = similarity(jul.norm_text, yabout_pages_excluding_first[k].norm_text)
@@ -96,12 +108,11 @@ def align_pages(
                     best_score = adjusted
                     best_idx = k
 
+        # 핵심 변경: 못 찾으면 예전처럼 에러 내지 말고 정렬 종료
         if best_idx is None or best_score < fallback_threshold:
-            raise RuntimeError(
-                f"줄 파일 {i+2}페이지와 대응되는 야붙 페이지를 찾지 못했습니다. "
-                f"(best_score={best_score:.3f})"
-            )
+            break
 
+        # 현재 포인터 j부터 best_idx 직전까지는 중간 삽입 야붙
         for extra_idx in range(j, best_idx):
             extras.append(extra_idx)
 
@@ -109,6 +120,7 @@ def align_pages(
         matches.append((i, best_idx, real_score))
         j = best_idx + 1
 
+    # 남은 야붙은 모두 extras 처리
     for extra_idx in range(j, total_y):
         extras.append(extra_idx)
 
@@ -116,7 +128,7 @@ def align_pages(
 
 
 def _nfc(s: str) -> str:
-    return unicodedata.normalize('NFC', s)
+    return unicodedata.normalize("NFC", s)
 
 
 def build_output_stem(jul_path: Path) -> str:
@@ -130,47 +142,83 @@ def auto_detect(folder: Path) -> Tuple[Path, Path]:
     pdfs = sorted(folder.glob("*.pdf"))
     jul_candidates = [p for p in pdfs if "줄" in _nfc(p.stem) and "야붙" not in _nfc(p.stem)]
     yabout_candidates = [p for p in pdfs if "야붙" in _nfc(p.stem)]
+
     if len(jul_candidates) != 1 or len(yabout_candidates) != 1:
         raise RuntimeError(
             "자동 탐지에 실패했습니다. --jul 과 --yabout 경로를 직접 넣어 주세요.\n"
             f"줄 후보: {[p.name for p in jul_candidates]}\n"
             f"야붙 후보: {[p.name for p in yabout_candidates]}"
         )
+
     return jul_candidates[0], yabout_candidates[0]
 
 
 def compute_page_plan(jul_path: Path, yabout_path: Path) -> Tuple[List[PageRef], dict]:
     jul_infos = extract_page_infos(jul_path)
     yabout_infos = extract_page_infos(yabout_path)
+
     if not jul_infos:
         raise RuntimeError("줄 파일이 비어 있습니다.")
     if not yabout_infos:
         raise RuntimeError("야붙 파일이 비어 있습니다.")
 
-    matches_tail, _extra_indices_excl_first = align_pages(jul_infos[1:], yabout_infos[1:])
-    matches = [(jul_idx0 + 1, y_idx0_excl_first, score) for jul_idx0, y_idx0_excl_first, score in matches_tail]
+    # 줄 1p와 야붙 1p는 별도 처리, 그 이후 tail 정렬
+    matches_tail, extras_tail = align_pages(jul_infos[1:], yabout_infos[1:])
 
-    plan: List[PageRef] = [PageRef("yabout", 1, "inserted_yabout_front"), PageRef("jul", 1, "original_jul")]
+    # matches_tail의 jul index는 jul_infos[1:] 기준이므로 실제 jul page는 +2
+    matches = [
+        (jul_idx0 + 1, y_idx0_excl_first, score)
+        for jul_idx0, y_idx0_excl_first, score in matches_tail
+    ]
+
+    plan: List[PageRef] = [
+        PageRef("yabout", 1, "inserted_yabout_front"),
+        PageRef("jul", 1, "original_jul"),
+    ]
+
     prev_y_idx_excl_first = 0
     low_conf = []
 
     for jul_idx0, y_idx0_excl_first, score in matches:
+        # 이전 매칭 이후부터 현재 매칭 직전까지의 야붙은 중간 삽입
         for k in range(prev_y_idx_excl_first, y_idx0_excl_first):
             abs_page_1based = k + 2
             plan.append(PageRef("yabout", abs_page_1based, "inserted_yabout_middle"))
+
+        # 중요 수정: 실제 줄 절대 페이지 번호는 +2
         abs_jul_page = jul_idx0 + 1
         plan.append(PageRef("jul", abs_jul_page, "original_jul"))
+
         if score < 0.95:
-            low_conf.append({
-                "jul_page": abs_jul_page,
-                "matched_yabout_page": y_idx0_excl_first + 2,
-                "score": round(score, 4),
-            })
+            low_conf.append(
+                {
+                    "jul_page": abs_jul_page,
+                    "matched_yabout_page": y_idx0_excl_first + 2,
+                    "score": round(score, 4),
+                }
+            )
+
         prev_y_idx_excl_first = y_idx0_excl_first + 1
 
-    for k in range(prev_y_idx_excl_first, len(yabout_infos) - 1):
+    # 중요 추가:
+    # 매칭이 끝난 이후 남은 줄 페이지는 모두 그대로 보존
+    matched_jul_tail_indices = [m[0] for m in matches_tail]
+    last_matched_tail_idx = matched_jul_tail_indices[-1] if matched_jul_tail_indices else -1
+
+    for rem_tail_idx in range(last_matched_tail_idx + 1, len(jul_infos) - 1):
+        abs_jul_page = rem_tail_idx + 2
+        plan.append(PageRef("jul", abs_jul_page, "original_jul"))
+
+    # 남은 야붙 페이지는 모두 tail 삽입
+    for k in extras_tail:
         abs_page_1based = k + 2
-        plan.append(PageRef("yabout", abs_page_1based, "inserted_yabout_tail"))
+        # 이미 middle 구간으로 들어간 것은 prev_y_idx_excl_first 이전일 수 있으므로
+        # tail에 남은 것만 추가되게 중복 방지
+        if not any(
+            p.source == "yabout" and p.page_no == abs_page_1based
+            for p in plan
+        ):
+            plan.append(PageRef("yabout", abs_page_1based, "inserted_yabout_tail"))
 
     inserted_yabout_pages_abs = [p.page_no for p in plan if p.source == "yabout"]
     jul_pages_in_output = [p.page_no for p in plan if p.source == "jul"]
@@ -219,22 +267,27 @@ def compute_page_plan(jul_path: Path, yabout_path: Path) -> Tuple[List[PageRef],
         "matching_summary": {
             "total_matches": len(matches),
             "low_confidence_matches_below_0.95": low_conf,
+            "matching_strategy": "relaxed_no_fail",
+            "unmatched_yabout_tail_pages": [k + 2 for k in extras_tail],
         },
         "page_plan": [asdict(p) for p in plan],
         "verification": verification,
         "note_preservation_rule": "줄 페이지는 최종 생성 시 반드시 원본 줄 PDF에서 직접 렌더링",
         "merge_pdf_policy": "중간병합본도 원본 페이지를 직접 insert_pdf 하여 벡터/폰트/필기를 보존",
     }
+
     return plan, report
 
 
 def write_merged_pdf_direct(page_plan: List[PageRef], source_pdfs: Dict[str, Path], output_pdf: Path) -> None:
-    """Create the intermediate merged PDF by directly copying original PDF pages.
+    """
+    Create the intermediate merged PDF by directly copying original PDF pages.
     This preserves original vectors, embedded fonts, and handwritten page content.
     """
     output_pdf.parent.mkdir(parents=True, exist_ok=True)
     docs = {name: fitz.open(path) for name, path in source_pdfs.items()}
     out = fitz.open()
+
     try:
         for pref in page_plan:
             src_doc = docs[pref.source]
@@ -247,8 +300,15 @@ def write_merged_pdf_direct(page_plan: List[PageRef], source_pdfs: Dict[str, Pat
             doc.close()
 
 
-def write_merge_outputs(jul_path: Path, yabout_path: Path, out_dir: Path, page_plan: List[PageRef], report: dict) -> Tuple[Path, Path, Path, Path]:
+def write_merge_outputs(
+    jul_path: Path,
+    yabout_path: Path,
+    out_dir: Path,
+    page_plan: List[PageRef],
+    report: dict,
+) -> Tuple[Path, Path, Path, Path]:
     out_dir.mkdir(parents=True, exist_ok=True)
+
     output_stem = build_output_stem(jul_path)
     output_pdf = out_dir / f"{output_stem}.pdf"
     report_json = out_dir / f"{output_stem}_검증보고서.json"
@@ -273,10 +333,16 @@ def write_merge_outputs(jul_path: Path, yabout_path: Path, out_dir: Path, page_p
         lines.append(f"- {check['name']}: {'PASS' if check['passed'] else 'FAIL'}")
     lines.append("")
     lines.append("중간병합본 생성 방식: 원본 페이지 direct insert_pdf (벡터/폰트/필기 보존)")
+    lines.append("매칭 정책: 실패 시 중단하지 않고 남은 줄 페이지는 유지, 남은 야붙 페이지는 뒤에 삽입")
+
     if report["matching_summary"]["low_confidence_matches_below_0.95"]:
         lines.append("낮은 확신도 매칭:")
         for item in report["matching_summary"]["low_confidence_matches_below_0.95"]:
-            lines.append(f"  줄 {item['jul_page']}p <-> 야붙 {item['matched_yabout_page']}p (score={item['score']})")
+            lines.append(
+                f"  줄 {item['jul_page']}p <-> 야붙 {item['matched_yabout_page']}p "
+                f"(score={item['score']})"
+            )
+
     report_txt.write_text("\n".join(lines), encoding="utf-8")
 
     with zipfile.ZipFile(output_zip, "w", compression=zipfile.ZIP_DEFLATED) as zf:
@@ -303,7 +369,10 @@ def main() -> None:
 
     out_dir = Path(args.outdir).expanduser().resolve()
     page_plan, report = compute_page_plan(jul_path, yabout_path)
-    output_pdf, output_zip, report_json, page_plan_json = write_merge_outputs(jul_path, yabout_path, out_dir, page_plan, report)
+    output_pdf, output_zip, report_json, page_plan_json = write_merge_outputs(
+        jul_path, yabout_path, out_dir, page_plan, report
+    )
+
     print(output_pdf)
     print(output_zip)
     print(report_json)
