@@ -1,0 +1,27 @@
+수정 사항 요약
+
+1) 전체 전사문 요약 정리표 생성 방식 변경
+- 기존: 바로 PDF 생성
+- 변경: DOCX 먼저 생성 -> LibreOffice headless로 PDF 변환
+- 변환 실패 시에만 이미지 기반 PDF를 fallback으로 생성
+- 생성 정보는 overall_transcript_summary_digest_generation.json에 저장
+
+2) 결과물 보존 강화
+- 전체 전사문 요약 정리표의 DOCX도 최종 산출물에 포함
+- 전체 전사문 요약 정리표 PDF/DOCX/생성정보 JSON을 함께 보존
+
+3) 다운로드/열기 안정성 강화
+- safe_download zip: 핵심 결과만 ASCII 파일명으로 재복사하여 압축
+- safe_full_archive zip: 전체 결과를 ASCII 파일명으로 재복사하여 압축
+- manifest에 preferred_delivery_file 추가
+- safe alias 폴더에 README_SAFE_DOWNLOAD 추가
+
+4) 테스트
+- python -m py_compile code/*.py 통과
+- DOCX->PDF 변환 smoke test 통과
+
+5) 전달 링크 검증 단계 추가
+- delivery_link_check.json/txt 생성
+- direct safe copy(ASCII 파일명) 생성 후 존재 여부/파일 크기/PDF 열기/ZIP 무결성/DOCX 구조 확인
+- 사용자에게는 passed=true인 direct safe copy 링크만 주도록 규칙 추가
+- direct link가 불안정하면 safe_download zip 우선 전달
