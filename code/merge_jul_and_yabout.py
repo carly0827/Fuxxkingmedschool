@@ -67,8 +67,8 @@ def align_pages(
     jul_pages: List[PageInfo],
     yabout_pages_excluding_first: List[PageInfo],
     lookahead: int = 30,
-    threshold: float = 0.92,
-    fallback_threshold: float = 0.80,
+    threshold: float = 0.55,
+    fallback_threshold: float = 0.20,
 ) -> Tuple[List[Tuple[int, int, float]], List[int]]:
     """Return matches between jul[1:] and yabout[1:], and unmatched yabout pages."""
     matches: List[Tuple[int, int, float]] = []
