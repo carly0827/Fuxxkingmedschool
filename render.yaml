@@ -1,7 +1,0 @@
-services:
-  - type: web
-    name: final-notes-site
-    env: docker
-    plan: free
-    autoDeploy: true
-    healthCheckPath: /healthz
